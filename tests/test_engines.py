@@ -79,6 +79,14 @@ def test_build_command_unknown_engine():
     ("ERROR: [twitter] 20: NSFW tweet requires authentication. Use --cookies", "敏感内容"),
     ("ERROR: unable to download video data: HTTP Error 403: Forbidden", "敏感内容"),
     ("[twitter][error] HttpError: '429 Too Many Requests' for 'https://x.com/i/api'", "限流"),
+    ("WARNING: [twitter] Rate-limit exceeded; falling back to syndication endpoint", "限流"),
+    ("[twitter][error] 'Could not authenticate you.'", "敏感内容"),
+    ("ERROR: [twitter] 1840000000000000000: Error(s) while querying API: Could not authenticate you.", "敏感内容"),
+    ("ERROR: [youtube] id: Sign in to confirm you're not a bot. Use --cookies-from-browser or --cookies", "敏感内容"),
+    ("ERROR: could not find safari cookies database", "完全磁盘访问"),
+    ("[twitter][error] AuthorizationError: someone blocked your account", "屏蔽"),
+    ("ERROR: [twitter] 1: You are not authorized to view this protected tweet. Use --cookies-from-browser", "受保护"),
+    ("ERROR: unable to open for writing: [Errno 1] Operation not permitted: '/Volumes/USB/a.part'", "-o"),
 ])
 def test_diagnose(output, keyword):
     hints = diagnose(output, URL)
@@ -96,6 +104,9 @@ def test_diagnose_login_hint_depends_on_site():
     "[twitter][error] NotFoundError: https://x.com/someone/status/1840123456789012345",
     "[twitter][error] HttpError: Connection timed out (https://x.com/nsfw_loginless/status/1842901234567890123)",
     "[download] 42.0% of 10.00MiB at 403.21KiB/s\nERROR: Postprocessing: ffprobe and ffmpeg not found",
+    # 不影响使用的 cookie 数据库版本警告
+    "WARNING: Possibly unsupported firefox cookies database version: 18",
+    "[cookies][warning] Failed to get cookie database meta version (OperationalError)",
 ])
 def test_diagnose_no_false_positives(output):
     assert diagnose(output, URL) == []
@@ -111,6 +122,23 @@ def test_gallery_dl_fetches_card_videos_for_x_only(tmp_path):
     cfg = Config(output=str(tmp_path))
     assert "cards=true" in build_command(GALLERY_DL, URL, cfg)
     assert "cards=true" not in build_command(GALLERY_DL, "https://www.instagram.com/p/abc/", cfg)
+
+
+def test_gallery_dl_output_analysis():
+    url = "https://x.com/a/status/1"
+    assert engines.gallery_dl_saved("/dl/1.jpg\n# /dl/2.jpg\n\u2714 dl/3.jpg\n[twitter][info] x\n") == 3
+    assert engines.gallery_dl_no_results("[twitter][info] No results for https://x.com/a/status/1\n", url)
+    assert not engines.gallery_dl_no_results("[twitter][info] No results for https://x.com/id:9/timeline\n", url)
+    assert not engines.gallery_dl_partial("[download][error] Failed to download 1_1.mp4\n")
+    assert engines.gallery_dl_partial("/dl/1.jpg\n[download][error] Failed to download 1_2.jpg\n")
+
+
+def test_split_lines_handles_cr_across_chunks():
+    lines = []
+    pending = engines._split_lines("a\r", lines)
+    pending = engines._split_lines(pending + "\nb 10%\rb 20%\r", lines)
+    pending = engines._split_lines(pending + "done", lines, final=True)
+    assert lines == ["a\n"] and pending == "done"
 
 
 def test_run_keeps_progress_out_of_tail(capsys):

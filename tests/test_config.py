@@ -24,7 +24,7 @@ def test_defaults_when_file_missing():
     cfg = load(env={})
     assert cfg == Config()
     assert cfg.cookie_spec == "chrome"
-    assert cfg.output_dir == Path("~/Downloads/xdl").expanduser()
+    assert cfg.output_dir == Path("~/Downloads/xdl").expanduser().resolve()
 
 
 def test_explicit_missing_file_is_an_error(tmp_path):
@@ -76,6 +76,21 @@ def test_switching_browser_drops_lower_profile(ini):
     assert load(path, env={"XDL_BROWSER": "safari"}).profile == ""
     # 同一个浏览器则保留
     assert load(path, env={}, overrides={"browser": "chrome"}).cookie_spec == "chrome:Profile 2"
+
+
+def test_browser_case_does_not_drop_profile(ini):
+    path = ini("[xdl]\nbrowser = Chrome\nprofile = Profile 2\n")
+    assert load(path, env={}, overrides={"browser": "chrome"}).cookie_spec == "chrome:Profile 2"
+    assert load(path, env={"XDL_BROWSER": "CHROME"}).cookie_spec == "chrome:Profile 2"
+
+
+@pytest.mark.parametrize("body", ["", "\n  \n", "\ufeff"])
+def test_empty_config_file_is_fine(ini, body):
+    assert load(ini(body), env={}) == Config()
+
+
+def test_bom_config_file(ini):
+    assert load(ini("\ufeff[xdl]\nbrowser = firefox\n"), env={}).browser == "firefox"
 
 
 def test_safari_never_gets_profile():

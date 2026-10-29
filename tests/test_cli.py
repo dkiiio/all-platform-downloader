@@ -79,11 +79,16 @@ def test_piped_text_without_urls_does_not_use_clipboard(monkeypatch):
     assert cli.main(["--dry-run"]) == 2
 
 
-def test_args_without_urls_fall_back_to_clipboard(monkeypatch, tmp_path, capsys):
-    # 快速操作在访达里选中文件时,传进来的是文件路径
+def test_quick_action_args_without_urls_fall_back_to_clipboard(monkeypatch, tmp_path, capsys):
+    # 快速操作在访达里选中文件时,传进来的是文件路径;脚本会加 --clipboard-fallback
     monkeypatch.setattr(cli, "_read_clipboard", lambda: "https://x.com/clip/status/9")
-    assert cli.main(["--dry-run", "-o", str(tmp_path), "/Users/a/Desktop/photo.png"]) == 0
+    assert cli.main(["--dry-run", "--clipboard-fallback", "-o", str(tmp_path), "/Users/a/Desktop/photo.png"]) == 0
     assert _targets(capsys.readouterr().out) == ["https://x.com/clip/status/9"]
+
+
+def test_typed_args_without_urls_do_not_use_clipboard(monkeypatch):
+    monkeypatch.setattr(cli, "_read_clipboard", lambda: "https://x.com/clip/status/9")
+    assert cli.main(["--dry-run", "x.com/wanted/status/123"]) == 2
 
 
 @pytest.mark.parametrize("tty", [False, True])
@@ -155,11 +160,29 @@ def test_no_results_from_gallery_dl_falls_back(monkeypatch, tmp_path, capsys):
 
 def test_partial_gallery_dl_failure_skips_fallback(monkeypatch, tmp_path, capsys):
     calls = []
-    monkeypatch.setattr(engines, "run", _fake_run(
-        [(4, "[download][error] Failed to download 20_3.jpg\n")], calls))
+    out = "/dl/twitter/a/1_1.jpg\n[download][error] Failed to download 1_2.jpg\n" + "# /dl/x.jpg\n" * 100
+    monkeypatch.setattr(engines, "run", _fake_run([(4, out)], calls))
     assert cli.main(["-o", str(tmp_path), "https://x.com/a/status/1"]) == 1
     assert len(calls) == 1
     assert "部分失败:https://x.com/a/status/1" in capsys.readouterr().out
+
+
+def test_gallery_dl_total_failure_still_falls_back(monkeypatch, tmp_path, capsys):
+    # 单视频推文唯一的文件下载失败:什么都没存下,应该换 yt-dlp
+    calls = []
+    monkeypatch.setattr(engines, "run", _fake_run(
+        [(4, "[download][error] Failed to download 1_1.mp4\n"), (0, "")], calls))
+    assert cli.main(["-o", str(tmp_path), "https://x.com/a/status/1"]) == 0
+    assert [c[2] for c in calls] == ["gallery_dl", "yt_dlp"]
+
+
+def test_child_no_results_is_still_success(monkeypatch, tmp_path):
+    # 关注列表里某个人没有媒体:子任务的 No results 不代表整体失败
+    calls = []
+    out = "/dl/twitter/alice/1_1.jpg\n[twitter][info] No results for https://x.com/id:9/timeline\n"
+    monkeypatch.setattr(engines, "run", _fake_run([(0, out)], calls))
+    assert cli.main(["-o", str(tmp_path), "https://x.com/a/following"]) == 0
+    assert len(calls) == 1
 
 
 def test_ctrl_c_exits_130(monkeypatch, tmp_path, capsys):

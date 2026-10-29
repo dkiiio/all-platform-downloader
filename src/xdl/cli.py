@@ -34,6 +34,8 @@ def _parser():
     p.add_argument("--config", help="配置文件路径(默认 ~/.config/xdl/config.ini)")
     p.add_argument("--update", action="store_true", help="升级 gallery-dl 和 yt-dlp(X 接口变动后常用)")
     p.add_argument("--version", action="version", version="xdl " + __version__)
+    # 快捷指令专用:快速操作传进来的参数里没有链接(比如访达里选中的文件)时改读剪贴板
+    p.add_argument("--clipboard-fallback", action="store_true", help=argparse.SUPPRESS)
     return p
 
 
@@ -53,9 +55,9 @@ def _collect(args):
     if not texts and sys.stdin is not None and not sys.stdin.isatty():
         piped = sys.stdin.read()
         found = urls.extract_urls(piped)
-    # 快捷指令里 stdin 通常是空的,快速操作传进来的可能是文件路径或不含链接的文字,
-    # 这些情况都退回剪贴板;只有管道里明确给了文字时才不去碰剪贴板
-    if not found and not piped.strip() and not args.file:
+    # 什么都没给(快捷指令里 stdin 通常是空的)时读剪贴板;
+    # 明确给了参数、文件或管道文字却没有链接,就报错,免得下载剪贴板里不相干的东西
+    if not found and not piped.strip() and (not texts or args.clipboard_fallback):
         found = urls.extract_urls(_read_clipboard())
     # 规范化之后可能出现重复(比如 twitter.com 与 x.com 同一条)
     return list(dict.fromkeys(urls.normalize(u) for u in found))
@@ -94,18 +96,18 @@ def download(url, cfg, forced=None, dry_run=False):
             continue
         code, out = engines.run(cmd)
         output += out
-        is_gdl = engine == engines.GALLERY_DL
-        if is_gdl and engines.PARTIAL in out:
-            # 已经存下了一部分,换引擎会重复下载;重跑时存档会跳过已下好的
-            print("!! gallery-dl 有文件下载失败,重新运行一次通常能补齐")
-            status = PARTIAL
-            break
-        if code == 0 and not (is_gdl and engines.NO_RESULTS in out):
-            return OK
+        if engine == engines.GALLERY_DL:
+            if engines.gallery_dl_partial(out):
+                # 已经存下了一部分,换引擎会重复下载;重跑时存档会跳过已下好的
+                print("!! gallery-dl 有文件下载失败,重新运行一次通常能补齐")
+                status = PARTIAL
+                break
+            if code == 0 and engines.gallery_dl_no_results(out, url):
+                print("!! gallery-dl 没找到可下载的媒体")
+                continue
         if code == 0:
-            print("!! gallery-dl 没找到可下载的媒体")
-        else:
-            print("!! {} 失败(退出码 {})".format(engine, code))
+            return OK
+        print("!! {} 失败(退出码 {})".format(engine, code))
     for hint in engines.diagnose(output, url):
         print("提示:" + hint)
     return status
@@ -144,7 +146,7 @@ def _main(args):
             "archive": False if args.no_archive else None,
         },
     )
-    if cfg.cookies and cfg.browser.lower() not in engines.SUPPORTED_BROWSERS:
+    if cfg.cookies and cfg.browser not in engines.SUPPORTED_BROWSERS:
         raise config.ConfigError(
             "不支持的浏览器:{}。可选:{}".format(cfg.browser, "、".join(engines.SUPPORTED_BROWSERS))
         )

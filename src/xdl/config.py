@@ -27,12 +27,12 @@ class Config:
 
     @property
     def output_dir(self):
-        return Path(self.output).expanduser()
+        return Path(self.output).expanduser().resolve()
 
     @property
     def cookie_spec(self):
         """gallery-dl 和 yt-dlp 通用的 --cookies-from-browser 参数值。"""
-        if not self.profile or self.browser.lower() in _NO_PROFILE_BROWSERS:
+        if not self.profile or self.browser in _NO_PROFILE_BROWSERS:
             return self.browser
         return self.browser + ":" + self.profile
 
@@ -40,6 +40,8 @@ class Config:
 def _apply(cfg, values):
     """合并一层配置。换了浏览器但这一层没给配置名时,丢掉下层的配置名
     (Chrome 的 Profile 2 对 Firefox/Safari 没有意义)。"""
+    if "browser" in values:
+        values = dict(values, browser=values["browser"].strip().lower())
     if "browser" in values and "profile" not in values and values["browser"] != cfg.browser:
         values = dict(values, profile="")
     return replace(cfg, **values)
@@ -52,9 +54,13 @@ def _read_file(path, explicit):
         return {}
     parser = configparser.ConfigParser(interpolation=None)
     try:
-        parser.read(path, encoding="utf-8")
+        # utf-8-sig:文本编辑器存的文件可能带 BOM
+        text = path.read_text(encoding="utf-8-sig")
+        parser.read_string(text, source=str(path))
     except (configparser.Error, UnicodeDecodeError) as e:
         raise ConfigError("配置文件格式错误:{}(第一行应为 [xdl]):{}".format(path, e)) from e
+    if not text.strip():
+        return {}
     if not parser.has_section("xdl"):
         raise ConfigError("配置文件缺少 [xdl] 段:{}".format(path))
     section = parser["xdl"]
