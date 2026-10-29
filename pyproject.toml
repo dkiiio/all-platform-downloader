@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xdl"
+version = "0.1.0"
+description = "用浏览器登录态下载 X 等平台的图片和视频(基于 gallery-dl 和 yt-dlp)"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "gallery-dl>=1.30",
+    "yt-dlp>=2025.1.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+xdl = "xdl.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
